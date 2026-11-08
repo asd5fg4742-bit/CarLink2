@@ -36,41 +36,81 @@ jobs:
 
       - name: Join ZIP parts
         run: |
-          cat CarLink-fa.zip.part000 CarLink-fa.zip.part001 CarLink-fa.zip.part002 > full.zip
+          cat CarLink-fa.zip.part000 \
+              CarLink-fa.zip.part001 \
+              CarLink-fa.zip.part002 > full.zip
+
           unzip -tq full.zip
           mkdir project
           unzip -q full.zip -d project
 
-      - name: Check project files
+      - name: Find project
         run: |
           DIR=$(find project -type f -name gradlew -print -quit | xargs -r dirname)
+
           if [ -z "$DIR" ]; then
             echo "ERROR: gradlew not found"
-            find project -maxdepth 3 -type f | head -50
             exit 1
           fi
+
           echo "PROJECT_DIR=$DIR" >> "$GITHUB_ENV"
-          echo "Project found: $DIR"
+          echo "Project: $DIR"
+
+      - name: Diagnose Gradle configuration
+        run: |
+          echo "=== Gradle configuration files ==="
+
+          find "$PROJECT_DIR" -type f \
+            \( -name "settings.gradle" \
+            -o -name "settings.gradle.kts" \
+            -o -name "libs.versions.toml" \
+            -o -name "gradle.properties" \) \
+            -print
+
+          echo "=== Version catalog files ==="
+
+          find "$PROJECT_DIR" -type f -name "libs.versions.toml" \
+            -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \;
+
+          echo "=== Settings files ==="
+
+          find "$PROJECT_DIR" -maxdepth 2 \
+            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \;
 
       - name: Build Debug APK
         run: |
           cd "$PROJECT_DIR"
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Locate APK
+        if: success()
         run: |
-          APK=$(find "$PROJECT_DIR" -type f -path '*/build/outputs/apk/debug/*.apk' -print -quit)
-          if [ -z "$APK" ]; then
+          mkdir -p output
+
+          find "$PROJECT_DIR" -type f \
+            -path '*/build/outputs/apk/debug/*.apk' \
+            -exec cp {} output/ \;
+
+          if [ -z "$(find output -name '*.apk' -print -quit)" ]; then
             echo "ERROR: APK not found"
             exit 1
           fi
-          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
-          echo "APK found: $APK"
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: CarLink-fa-apk
-          path: ${{ env.APK_PATH }}
+          path: output/*.apk
           if-no-files-found: error
+
+      - name: Upload Gradle diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CarLink-gradle-diagnostics
+          path: |
+            project/**/build/reports/
+          if-no-files-found: ignore
