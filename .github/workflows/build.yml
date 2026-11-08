@@ -3,122 +3,74 @@ name: Build CarLink APK
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'CarLink-fa.zip.part000'
+      - 'CarLink-fa.zip.part001'
+      - 'CarLink-fa.zip.part002'
+      - '.github/workflows/build.yml'
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build CarLink
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
     steps:
-      # 1. دریافت مخزن
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      # 2. بررسی سه قسمت ZIP
-      - name: Check ZIP parts
-        run: |
-          set -euo pipefail
-
-          test -f CarLink-fa.zip.part000
-          test -f CarLink-fa.zip.part001
-          test -f CarLink-fa.zip.part002
-
-          echo "All ZIP parts found."
-          ls -lh CarLink-fa.zip.part*
-
-      # 3. اتصال و استخراج ZIP
-      - name: Join and extract source
-        run: |
-          set -euo pipefail
-
-          cat \
-            CarLink-fa.zip.part000 \
-            CarLink-fa.zip.part001 \
-            CarLink-fa.zip.part002 \
-            > full.zip
-
-          echo "Checking ZIP integrity..."
-          unzip -t full.zip
-
-          mkdir -p project
-          unzip -q full.zip -d project
-
-          echo "Searching for Gradle wrapper..."
-
-          find project -type f -name gradlew
-
-          DIR=$(find project -type f -name gradlew -printf '%h\n' | head -n 1)
-
-          if [ -z "$DIR" ]; then
-            echo "ERROR: gradlew not found!"
-            exit 1
-          fi
-
-          echo "PROJECT_DIR=$DIR" >> "$GITHUB_ENV"
-
-          echo "Project directory: $DIR"
-
-      # 4. نصب Java 21
       - name: Setup Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
 
-      # 5. نصب Android SDK
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
-      # 6. تنظیم Gradle
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
-      # 7. بررسی پروژه
+      - name: Join ZIP parts
+        run: |
+          cat CarLink-fa.zip.part000 CarLink-fa.zip.part001 CarLink-fa.zip.part002 > full.zip
+          unzip -tq full.zip
+          mkdir project
+          unzip -q full.zip -d project
+
       - name: Check project files
         run: |
-          set -euo pipefail
-
-          java -version
-
-          cd "$PROJECT_DIR"
-
-          ls -lah
-
-          test -f gradlew
-
-      # 8. ساخت APK
-      - name: Build Debug APK
-        run: |
-          set -euo pipefail
-
-          cd "$PROJECT_DIR"
-
-          chmod +x gradlew
-
-          ./gradlew assembleDebug --no-daemon --stacktrace
-
-      # 9. بررسی خروجی
-      - name: Locate APK
-        run: |
-          set -euo pipefail
-
-          find project -type f -name "*.apk"
-
-          if ! find project -type f -name "*.apk" | grep -q .; then
-            echo "ERROR: No APK generated!"
+          DIR=$(find project -type f -name gradlew -print -quit | xargs -r dirname)
+          if [ -z "$DIR" ]; then
+            echo "ERROR: gradlew not found"
+            find project -maxdepth 3 -type f | head -50
             exit 1
           fi
+          echo "PROJECT_DIR=$DIR" >> "$GITHUB_ENV"
+          echo "Project found: $DIR"
 
-      # 10. آپلود APK
+      - name: Build Debug APK
+        run: |
+          cd "$PROJECT_DIR"
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Locate APK
+        run: |
+          APK=$(find "$PROJECT_DIR" -type f -path '*/build/outputs/apk/debug/*.apk' -print -quit)
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK not found"
+            exit 1
+          fi
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+          echo "APK found: $APK"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CarLink-fa-debug-apk
-          path: project/**/*.apk
+          name: CarLink-fa-apk
+          path: ${{ env.APK_PATH }}
           if-no-files-found: error
-          retention-days: 7
-
