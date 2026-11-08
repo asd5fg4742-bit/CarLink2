@@ -26,6 +26,13 @@ jobs:
           echo "PROJECT_DIR=$ROOT" >> $GITHUB_ENV
           ls -la "$ROOT" "$ROOT/gradle"
 
+      - name: Patch DiAuto plugin alias
+        run: |
+          for f in "$PROJECT_DIR/vendor/diauto/app/build.gradle.kts" "$PROJECT_DIR/vendor/diauto/contract/build.gradle.kts"; do
+            sed -i 's/alias(libs\.plugins\.android\.library)/id("com.android.library")/' "$f"
+            echo "== $f"; grep -n 'com.android.library\|libs\.' "$f"
+          done
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
